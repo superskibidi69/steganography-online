@@ -1,4 +1,4 @@
-$('button.encode, button.decode').click(function(event) {
+$('button.encode, button.decode, button.download').click(function(event) {
   event.preventDefault();
 });
 
@@ -30,6 +30,14 @@ function previewImage(file, canvasSelector, callback) {
   var $canvas = $(canvasSelector);
   var context = $canvas[0].getContext('2d');
 
+  // validate file is an image
+  if (!file) return;
+  if (file.type && !file.type.startsWith('image/')) {
+    $(".error").text('Please select an image file (PNG / JPG / GIF etc).').fadeIn();
+    return;
+  }
+  $(".error").hide();
+
   if (file) {
     reader.readAsDataURL(file);
   }
@@ -50,7 +58,8 @@ function previewImage(file, canvasSelector, callback) {
   }
 }
 
-function encodeMessage() {
+function encodeMessage(event) {
+  if (event && event.preventDefault) event.preventDefault();
   $(".error").hide();
   $(".binary").hide();
 
@@ -137,7 +146,8 @@ function encodeMessage() {
 };
 
 // Download the message canvas as an image (PNG)
-function downloadMessageImage() {
+function downloadMessageImage(event) {
+  if (event && event.preventDefault) event.preventDefault();
   var canvas = document.querySelector('.message canvas');
 
   if (!canvas) {
@@ -175,7 +185,8 @@ function downloadMessageImage() {
   }
 }
 
-function decodeMessage() {
+function decodeMessage(event) {
+  if (event && event.preventDefault) event.preventDefault();
   var $originalCanvas = $('.decode canvas');
   var originalContext = $originalCanvas[0].getContext("2d");
 
