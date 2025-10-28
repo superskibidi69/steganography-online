@@ -152,14 +152,14 @@ function downloadMessageImage() {
       var a = document.createElement('a');
       a.style.display = 'none';
       a.href = url;
-      a.download = 'stego.png';
+      a.download = `${Date.now}_stego.png`;
       document.body.appendChild(a);
       a.click();
       // cleanup
       setTimeout(function() {
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
-      }, 100);
+      }, 167);
     }, 'image/png');
   }
   else {
