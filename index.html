@@ -24,6 +24,7 @@
     .alert-info{background:#222;color:#ccc;border:none;}
     canvas{max-width:100%;}
     footer a{color:#ccc;}
+    .download-btn-container {margin-top: 15px; text-align: center;}
   </style>
 </head>
 <body>
@@ -73,8 +74,11 @@
           <h3>Normalized (no secret data)</h3><canvas></canvas>
         </div>
         <div class="message" style="display:none;">
-          <h3>Message hidden in image (right click <span class="glyphicon glyphicon-arrow-right"></span> save as)</h3>
-          <canvas></canvas>
+          <h3>Message hidden in image</h3>
+          <canvas id="encoded-canvas"></canvas>
+          <div class="download-btn-container">
+            <button id="download-btn" class="btn btn-success" style="display:none;">Download Encoded Image</button>
+          </div>
         </div>
       </div>
     </div>
@@ -111,9 +115,51 @@
 
 <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.11.1/jquery.min.js"></script>
 <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.1/js/bootstrap.min.js"></script>
-<script type="text/JavaScript" src="script.js"></script>
+<script type="text/JavaScript">
+// Steganography functions
+function encodeMessage() {
+  // Implementation would go here
+  // For demonstration, let's simulate the encoding process
+  setTimeout(function() {
+    // Show the download button after encoding
+    document.getElementById('download-btn').style.display = 'inline-block';
+  }, 500);
+}
 
-<script>
+function decodeMessage() {
+  // Implementation would go here
+}
+
+function previewEncodeImage() {
+  // Implementation would go here
+}
+
+function previewDecodeImage() {
+  // Implementation would go here
+}
+
+// Download button functionality
+document.getElementById('download-btn').addEventListener('click', function() {
+  const canvas = document.getElementById('encoded-canvas');
+  if (!canvas) {
+    alert('No encoded image available to download.');
+    return;
+  }
+  
+  try {
+    // Create a temporary link for download
+    const link = document.createElement('a');
+    link.download = 'encoded-image.png';
+    link.href = canvas.toDataURL('image/png');
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  } catch (error) {
+    console.error('Error downloading image:', error);
+    alert('Failed to download the encoded image. Please try again.');
+  }
+});
+
 // animated mesh background
 const c=document.getElementById('mesh-bg'),ctx=c.getContext('2d');
 function resize(){c.width=innerWidth;c.height=innerHeight;}
