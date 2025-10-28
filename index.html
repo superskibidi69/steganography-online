@@ -1,110 +1,162 @@
+<!DOCTYPE html>
 <html>
 <head>
   <title>Steganography Online</title>
   <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.1/css/bootstrap.min.css">
+  <style>
+    html, body {margin:0; padding:0; height:100%; overflow:hidden; font-family:sans-serif;}
+    body {color:#e0e0e0; background:#000;}
+    #c-bg {position:fixed; top:0; left:0; width:100%; height:100%; z-index:-1;}
+    .container {position:relative; z-index:1; padding-top:20px;}
+    .page-header h1 {color:#fff;}
+    .nav-tabs > li > a {
+      color: #e0e0e0; background-color: #1e1e1e; border-color:#333;
+    }
+    .nav-tabs > li.active > a, .nav-tabs > li.active > a:hover {
+      background-color:#333; color:#fff;
+    }
+    .tab-content {
+      padding:20px; background-color:#1e1e1e; border:1px solid #333; border-top:none; border-radius:0 0 5px 5px;
+    }
+    .form-control {background-color:#2a2a2a; color:#fff; border:1px solid #444;}
+    .form-control:focus {background-color:#2a2a2a; color:#fff; border-color:#666; box-shadow:none;}
+    .btn {background-color:#444; color:#fff; border:none;}
+    .btn:hover {background-color:#555;}
+    .alert-info {background-color:#222; color:#ccc; border:none;}
+    canvas {max-width:100%;}
+    footer a {color:#ccc;}
+  </style>
 </head>
 <body>
-  <div class="container">
-    <div class="page-header">
-      <h1>Steganography Online</h1>
-    </div>
+<canvas id="c-bg"></canvas>
 
-    <ul class="nav nav-tabs" id="tabs" data-tabs="tabs">
-      <li role="presentation" class="active"> <a href="#encode" data-toggle="tab">Encode</a></li>
-      <li role="presentation"> <a href="#decode" data-toggle="tab">Decode</a></li>
-    </ul>
+<div class="container">
+  <div class="page-header">
+    <h1>Steganography Online</h1>
+  </div>
 
-    <div id="my-tab-content" class="tab-content">
-      <div class="tab-pane active" id="encode">
-        <div>
-          <h2>Encode message</h2>
-          <p class="alert alert-info">
-            To encode a message into an image, choose the image you want to use, enter your text and hit the <strong>Encode</strong> button. <br/>
-            Save the last image, it will contain your hidden message. <br/>
-            Remember, the more text you want to hide, the larger the image has to be. In case you chose an image that is too small to hold your message you will be informed.<br/><br/>
-            Neither the image nor the message you hide will be at any moment transmitted over the web, all the magic happens within your browser.
-          </p>
-          <form class="form">
-            <div class="form-group">
-              <input class="form-control" type="file" name="baseFile" onchange="previewEncodeImage()">
-            </div>
+  <ul class="nav nav-tabs" id="tabs" data-tabs="tabs">
+    <li role="presentation" class="active"> <a href="#encode" data-toggle="tab">Encode</a></li>
+    <li role="presentation"> <a href="#decode" data-toggle="tab">Decode</a></li>
+  </ul>
 
-            <div class="form-group">
-              <textarea class="form-control message" rows="3" placeholder="Enter your message here"></textarea>
-            </div>
-
-            <div class="form-group">
-              <button class="encode btn btn-default pull-right" onclick="encodeMessage()">Encode</button>
-            </div>
-          </form>
-          <div class="clearfix"></div>
-        </div>
-
-        <div class="error" style="display: none;"></div>
-        <div class="binary" style="display: none;">
-          <h3>Binary representation of your message</h3>
-          <textarea class="form-control message" style="word-wrap:break-word;">
-          </textarea>
-        </div>
-        <div class="images" style="display: none;">
-          <div class="original" style="display: none;">
-            <h3>Original</h3>
-            <canvas></canvas>
+  <div id="my-tab-content" class="tab-content">
+    <div class="tab-pane active" id="encode">
+      <div>
+        <h2>Encode message</h2>
+        <p class="alert alert-info">
+          To encode a message into an image, choose the image you want to use, enter your text and hit the <strong>Encode</strong> button. <br/>
+          Save the last image, it will contain your hidden message. <br/>
+          Remember, the more text you want to hide, the larger the image has to be. In case you chose an image that is too small to hold your message you will be informed.<br/><br/>
+          Neither the image nor the message you hide will be at any moment transmitted over the web, all the magic happens within your browser.
+        </p>
+        <form class="form">
+          <div class="form-group">
+            <input class="form-control" type="file" name="baseFile" onchange="previewEncodeImage()">
           </div>
-          <div class="nulled" style="display: none;">
-            <h3>Normalized</h3>
-            <canvas></canvas>
+          <div class="form-group">
+            <input class="form-control" type="text" placeholder="Or enter image URL" id="image-url">
           </div>
-          <div class="message" style="display: none;">
-            <h3>Message hidden in image (right click <span class="glyphicon glyphicon-arrow-right"></span> save as)</h3>
-            <canvas></canvas>
+          <div class="form-group">
+            <textarea class="form-control message" rows="3" placeholder="Enter your message here"></textarea>
           </div>
-        </div>
+          <div class="form-group">
+            <button class="encode btn pull-right" onclick="encodeMessage()">Encode</button>
+          </div>
+        </form>
+        <div class="clearfix"></div>
       </div>
-
-      <div class="tab-pane" id="decode">
-        <div>
-          <h2>Decode image</h2>
-          <p class="alert alert-info">
-            To decode a hidden message from an image, just choose an image and hit the <strong>Decode</strong> button.<br/><br/>
-            Neither the image nor the message that has been hidden will be at any moment transmitted over the web, all the magic happens within your browser.
-          </p>
-          <form class="form">
-            <div class="form-group">
-              <input class="form-control" type="file" name="decodeFile" onchange="previewDecodeImage()">
-            </div>
-            <div class="form-group">
-              <button class="decode btn btn-default pull-right" onclick="decodeMessage()">Decode</button>
-            </div>
-          </form>
-          <div class="clearfix"></div>
+      <div class="error" style="display: none;"></div>
+      <div class="binary" style="display: none;">
+        <h3>Binary representation of your message</h3>
+        <textarea class="form-control message" style="word-wrap:break-word;"></textarea>
+      </div>
+      <div class="images" style="display: none;">
+        <div class="original" style="display: none;">
+          <h3>Original</h3>
+          <canvas></canvas>
         </div>
-        <div class="binary-decode" style="display: none;">
-          <h3>Hidden message</h3>
-          <textarea class="form-control message" style="word-wrap:break-word;">
-          </textarea>
+        <div class="nulled" style="display: none;">
+          <h3>Normalized</h3>
+          <canvas></canvas>
         </div>
-        <div class="decode" style="display: none;">
-          <h3>Input</h3>
+        <div class="message" style="display: none;">
+          <h3>Message hidden in image (right click <span class="glyphicon glyphicon-arrow-right"></span> save as)</h3>
           <canvas></canvas>
         </div>
       </div>
-
     </div>
 
-    <footer style="text-align: center; margin-top: 20px; margin-bottom: 10px;">
-      &copy; 2014 by <a href="mailto:stylesuxx@gmail.com">stylesuxx</a>
-    </footer>
+    <div class="tab-pane" id="decode">
+      <div>
+        <h2>Decode image</h2>
+        <p class="alert alert-info">
+          To decode a hidden message from an image, just choose an image and hit the <strong>Decode</strong> button.<br/><br/>
+          Neither the image nor the message that has been hidden will be at any moment transmitted over the web, all the magic happens within your browser.
+        </p>
+        <form class="form">
+          <div class="form-group">
+            <input class="form-control" type="file" name="decodeFile" onchange="previewDecodeImage()">
+          </div>
+          <div class="form-group">
+            <input class="form-control" type="text" placeholder="Or enter image URL" id="decode-url">
+          </div>
+          <div class="form-group">
+            <button class="decode btn pull-right" onclick="decodeMessage()">Decode</button>
+          </div>
+        </form>
+        <div class="clearfix"></div>
+      </div>
+      <div class="binary-decode" style="display: none;">
+        <h3>Hidden message</h3>
+        <textarea class="form-control message" style="word-wrap:break-word;"></textarea>
+      </div>
+      <div class="decode" style="display: none;">
+        <h3>Input</h3>
+        <canvas></canvas>
+      </div>
+    </div>
+
   </div>
 
-  <style>
-    canvas {
-      max-width: 100%;
-    }
-  </style>
+  <footer style="text-align: center; margin-top: 20px; margin-bottom: 10px;">
+    &copy; 2014 by <a href="mailto:stylesuxx@gmail.com">stylesuxx</a>
+  </footer>
+</div>
 
-  <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.11.1/jquery.min.js"></script>
-  <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.1/js/bootstrap.min.js"></script>
-  <script type="text/JavaScript" src="script.js"></script>
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/1.11.1/jquery.min.js"></script>
+<script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.1/js/bootstrap.min.js"></script>
+<script type="text/JavaScript" src="script.js"></script>
+
+<script>
+// background mesh
+const c = document.getElementById('c-bg'), ctx = c.getContext('2d');
+c.width = innerWidth; c.height = innerHeight;
+let particles = [];
+for(let i=0;i<80;i++){
+  particles.push({x:Math.random()*c.width,y:Math.random()*c.height,dx:(Math.random()-0.5)*1.5,dy:(Math.random()-0.5)*1.5});
+}
+function dist(a,b){return Math.hypot(a.x-b.x,a.y-b.y);}
+function draw(){
+  ctx.fillStyle='#000'; ctx.fillRect(0,0,c.width,c.height);
+  particles.forEach(p=>{
+    p.x+=p.dx; p.y+=p.dy;
+    if(p.x<0||p.x>c.width)p.dx*=-1;
+    if(p.y<0||p.y>c.height)p.dy*=-1;
+    ctx.fillStyle='white'; ctx.beginPath(); ctx.arc(p.x,p.y,2,0,Math.PI*2); ctx.fill();
+  });
+  for(let i=0;i<particles.length;i++){
+    for(let j=i+1;j<particles.length;j++){
+      let d=dist(particles[i],particles[j]);
+      if(d<120){
+        ctx.strokeStyle=`hsla(${(i*10+Date.now()/10)%360},80%,60%,${1-d/120})`;
+        ctx.beginPath(); ctx.moveTo(particles[i].x,particles[i].y); ctx.lineTo(particles[j].x,particles[j].y); ctx.stroke();
+      }
+    }
+  }
+  requestAnimationFrame(draw);
+}
+draw();
+</script>
 </body>
 </html>
