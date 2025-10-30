@@ -1,6 +1,25 @@
 // Audio LSB script — supports 16-bit PCM WAV files
 $('button.encode, button.decode, button.download').click(function(e){e.preventDefault();});
 
+// Worker management
+var audioWorker = null;
+function ensureAudioWorker(){
+  if (audioWorker) return;
+  if (window.Worker) {
+    try { audioWorker = new Worker('/audio/worker.js'); } catch(e) { audioWorker = null; }
+  }
+}
+
+function resetAudioWorker(){
+  if (audioWorker) {
+    try { audioWorker.terminate(); } catch(e) {}
+    audioWorker = null;
+  }
+  $('#audio-app .progress-area').hide();
+  $('#audio-app .progress-area .progress-bar').css('width','0%').text('0%');
+  $('#audio-app .progress-area .cancel-process').hide();
+}
+
 function readFileAsArrayBuffer(file){
   return new Promise((resolve,reject)=>{
     var r=new FileReader();
@@ -184,49 +203,69 @@ function encodeMessageAudio(e){
         $('#audio-app .error').text('Text too long for chosen audio file.... (needs ' + neededBits + ' bits, capacity ' + capacityBits + ' bits)').show();
         return;
       }
+          // Preferred path: use audio worker to perform bit writes off-main-thread
+          ensureAudioWorker();
+          var msgLen = text.length >>> 0;
+          var messageBytes = new Uint8Array(4 + text.length);
+          messageBytes[0] = (msgLen >>> 24) & 0xFF;
+          messageBytes[1] = (msgLen >>> 16) & 0xFF;
+          messageBytes[2] = (msgLen >>> 8) & 0xFF;
+          messageBytes[3] = msgLen & 0xFF;
+          for (var z = 0; z < text.length; z++) messageBytes[4 + z] = text.charCodeAt(z) & 0xFF;
 
-      // Build binary string
-      // Prepend a 4-byte big-endian length header so decoding knows exact message length
-      var binaryMessage = '';
-      var msgLen = text.length >>> 0; // number of bytes
-      // 4-byte big-endian length
-      var headerBytes = [ (msgLen >>> 24) & 0xFF, (msgLen >>> 16) & 0xFF, (msgLen >>> 8) & 0xFF, msgLen & 0xFF ];
-      headerBytes.forEach(function(byte){
-        var bb = byte.toString(2);
-        while(bb.length < 8) bb = '0' + bb;
-        binaryMessage += bb;
-      });
+          if (audioWorker) {
+            $('#audio-app .progress-area').show();
+            $('#audio-app .progress-area .cancel-process').show();
+            $('#audio-app .progress-area .progress-bar').css('width','0%').text('0%');
 
-      for(var i=0;i<text.length;i++){
-        var b = text.charCodeAt(i).toString(2);
-        while(b.length < 8) b = '0' + b;
-        binaryMessage += b;
-      }
-      $('#audio-app .binary textarea').text(binaryMessage);
-
-      // Copy ArrayBuffer to modify
-  var out = new Uint8Array(buf.byteLength);
-  out.set(new Uint8Array(buf));
-
-      // Modify LSB of each sample's least significant byte
-      var dataOffset = info.dataOffset;
-      var bytesPerSampleInt = bytesPerSample;
-      var bitIdx = 0;
-      for(var s=0; s<sampleCount && bitIdx < binaryMessage.length; s++){
-        var byteIndex = dataOffset + (s * bytesPerSampleInt); // little-endian: LSB is first byte
-        var bit = parseInt(binaryMessage[bitIdx]);
-        out[byteIndex] = (out[byteIndex] & 0xFE) | bit; // set LSB
-        bitIdx++;
-      }
-
-      // Create blob
-      var blob = new Blob([out.buffer], {type: 'audio/wav'});
-      var url = URL.createObjectURL(blob);
-      $('#audio-app .message pre').text('Encoded file size: ' + blob.size + ' bytes');
-      $('#audio-app .message').show();
-      $('#audio-app .binary').show();
-      $('#audio-app .images').show();
-      $('#audio-app .download').prop('disabled', false).data('bloburl', url).data('blob', blob);
+            var onmessage = function(ev) {
+              var d = ev.data;
+              if (d.type === 'progress') {
+                $('#audio-app .progress-area .progress-bar').css('width', d.progress + '%').text(d.progress + '%');
+              } else if (d.type === 'done') {
+                var outBuf = d.buffer;
+                var blob = new Blob([outBuf], {type: 'audio/wav'});
+                var url = URL.createObjectURL(blob);
+                $('#audio-app .message pre').text('Encoded file size: ' + blob.size + ' bytes');
+                $('#audio-app .message').show();
+                $('#audio-app .binary').show();
+                $('#audio-app .images').show();
+                $('#audio-app .download').prop('disabled', false).data('bloburl', url).data('blob', blob);
+                audioWorker.removeEventListener('message', onmessage);
+                resetAudioWorker();
+              } else if (d.type === 'error') {
+                $('#audio-app .error').text('Worker error: ' + d.message).show();
+                audioWorker.removeEventListener('message', onmessage);
+                resetAudioWorker();
+              }
+            };
+            audioWorker.addEventListener('message', onmessage);
+            try {
+              audioWorker.postMessage({action: 'encode', buffer: buf, info: {dataOffset: info.dataOffset, bytesPerSample: bytesPerSample, sampleCount: sampleCount}, messageBytes: messageBytes}, [buf, messageBytes.buffer]);
+            } catch (err) {
+              // fallback: copy buffers
+              audioWorker.postMessage({action: 'encode', buffer: (new Uint8Array(buf)).buffer, info: {dataOffset: info.dataOffset, bytesPerSample: bytesPerSample, sampleCount: sampleCount}, messageBytes: messageBytes}, [(new Uint8Array(buf)).buffer, messageBytes.buffer]);
+            }
+            $('#audio-app .progress-area .cancel-process').off('click').on('click', function(){ resetAudioWorker(); });
+          } else {
+            // Fallback to main-thread write
+            var out = new Uint8Array(buf);
+            var dataOffset = info.dataOffset;
+            var bytesPerSampleInt = bytesPerSample;
+            var bitIdx = 0;
+            function writeBit(bit) { var s = bitIdx; var byteIndex = dataOffset + (s * bytesPerSampleInt); out[byteIndex] = (out[byteIndex] & 0xFE) | (bit & 1); bitIdx++; }
+            for (var hi = 0; hi < messageBytes.length; hi++) {
+              var hb = messageBytes[hi];
+              for (var b = 7; b >= 0; b--) writeBit((hb >> b) & 1);
+            }
+            var blob = new Blob([out.buffer], {type: 'audio/wav'});
+            var url = URL.createObjectURL(blob);
+            $('#audio-app .message pre').text('Encoded file size: ' + blob.size + ' bytes');
+            $('#audio-app .message').show();
+            $('#audio-app .binary').show();
+            $('#audio-app .images').show();
+            $('#audio-app .download').prop('disabled', false).data('bloburl', url).data('blob', blob);
+          }
 
     }catch(err){
       $('#audio-app .error').text('Error: ' + err.message).show();
@@ -268,49 +307,87 @@ function decodeMessageAudio(e){
       }
       var bytesPerSample = info.bitsPerSample / 8;
       var sampleCount = info.dataSize / bytesPerSample;
-      var dv = new DataView(wavBuf);
+      // Try using worker for decoding to avoid blocking
+      ensureAudioWorker();
+      if (audioWorker) {
+        $('#audio-app .progress-area').show();
+        $('#audio-app .progress-area .cancel-process').show();
+        $('#audio-app .progress-area .progress-bar').css('width','0%').text('0%');
 
-      var bits = '';
-      for(var s=0;s<sampleCount;s++){
-        var byteIndex = info.dataOffset + (s * bytesPerSample);
-        var lsb = dv.getUint8(byteIndex) & 1;
-        bits += (lsb ? '1' : '0');
+        var onmessage = function(ev) {
+          var d = ev.data;
+          if (d.type === 'progress') {
+            $('#audio-app .progress-area .progress-bar').css('width', d.progress + '%').text(d.progress + '%');
+          } else if (d.type === 'done-decode') {
+            $('#audio-app .binary-decode textarea').text(d.text);
+            $('#audio-app .binary-decode').show();
+            audioWorker.removeEventListener('message', onmessage);
+            resetAudioWorker();
+          } else if (d.type === 'error') {
+            $('#audio-app .error').text('Worker error: ' + d.message).show();
+            audioWorker.removeEventListener('message', onmessage);
+            resetAudioWorker();
+          }
+        };
+
+        audioWorker.addEventListener('message', onmessage);
+        try {
+          audioWorker.postMessage({action: 'decode', buffer: wavBuf, info: {dataOffset: info.dataOffset, bytesPerSample: bytesPerSample, sampleCount: sampleCount}}, [wavBuf]);
+        } catch (err) {
+          audioWorker.postMessage({action: 'decode', buffer: (new Uint8Array(wavBuf)).buffer, info: {dataOffset: info.dataOffset, bytesPerSample: bytesPerSample, sampleCount: sampleCount}}, [(new Uint8Array(wavBuf)).buffer]);
+        }
+        $('#audio-app .progress-area .cancel-process').off('click').on('click', function(){ resetAudioWorker(); });
+        return;
       }
 
-      // Try to read 32-bit big-endian length header first
-      var output = '';
-      if(bits.length >= 32){
-        var headerBits = bits.substr(0,32);
-        var hb = [];
-        for(var k=0;k<4;k++){
-          hb.push(parseInt(headerBits.substr(k*8,8),2) & 0xFF);
+      // Fallback: read LSBs directly without building a giant bits string.
+      var bytesPerSampleInt = info.bitsPerSample / 8;
+      var dv = new DataView(wavBuf);
+
+      function readBitAt(sampleIndex) {
+        var byteIndex = info.dataOffset + (sampleIndex * bytesPerSampleInt);
+        return dv.getUint8(byteIndex) & 1;
+      }
+
+      // Read 32-bit big-endian length header first (if available)
+      if (sampleCount >= 32) {
+        var headerVal = 0 >>> 0;
+        for (var hbi = 0; hbi < 32; hbi++) {
+          headerVal = ((headerVal << 1) | readBitAt(hbi)) >>> 0;
         }
-        var declaredLen = ((hb[0]<<24) | (hb[1]<<16) | (hb[2]<<8) | hb[3]) >>> 0;
-        var maxPayloadBytes = Math.floor((bits.length - 32)/8);
-        if(declaredLen <= maxPayloadBytes){
-          // good header -> extract exactly declaredLen bytes
-          var payloadBits = bits.substr(32, declaredLen * 8);
-          for(var i=0;i<payloadBits.length;i+=8){
-            var byte = payloadBits.substr(i,8);
-            var c = parseInt(byte,2);
-            output += String.fromCharCode(c);
+        var declaredLen = headerVal >>> 0;
+        var maxPayloadBytes = Math.floor((sampleCount - 32) / 8);
+        if (declaredLen <= maxPayloadBytes) {
+          // extract payload exactly declaredLen bytes
+          var outChars = [];
+          var startBit = 32;
+          for (var byteIdx = 0; byteIdx < declaredLen; byteIdx++) {
+            var c = 0;
+            for (var bitPos = 0; bitPos < 8; bitPos++) {
+              c = (c << 1) | readBitAt(startBit + byteIdx * 8 + bitPos);
+            }
+            outChars.push(String.fromCharCode(c));
           }
+          var output = outChars.join('');
           $('#audio-app .binary-decode textarea').text(output);
           $('#audio-app .binary-decode').show();
           return;
         }
       }
 
-      // Fallback for legacy files (no header): decode whole stream and trim trailing NULs
-      for(var i=0;i<bits.length;i+=8){
-        var byte = bits.substr(i,8);
-        if(byte.length < 8) break;
-        var c = parseInt(byte,2);
-        output += String.fromCharCode(c);
+      // Fallback: decode as much as possible and trim trailing NULs
+      var outChars2 = [];
+      var totalBytes = Math.floor(sampleCount / 8);
+      for (var bi = 0; bi < totalBytes; bi++) {
+        var c2 = 0;
+        for (var bitj = 0; bitj < 8; bitj++) {
+          c2 = (c2 << 1) | readBitAt(bi * 8 + bitj);
+        }
+        outChars2.push(String.fromCharCode(c2));
       }
-      // Trim trailing null characters that are likely padding
-      output = output.replace(/\x00+$/g, '');
-      $('#audio-app .binary-decode textarea').text(output);
+      var output2 = outChars2.join('');
+      output2 = output2.replace(/\x00+$/g, '');
+      $('#audio-app .binary-decode textarea').text(output2);
       $('#audio-app .binary-decode').show();
     }catch(err){
       $('#audio-app .error').text('Error: ' + err.message).show();

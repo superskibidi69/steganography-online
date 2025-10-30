@@ -60,12 +60,14 @@
           <button type="button" class="encode btn pull-right" onclick="encodeMessage(event)">Encode</button>
         </div>
       </form>
+      <div class="progress-area" style="margin-top:10px;display:none;">
+        <div class="progress" style="height:20px;background:#222;border:1px solid #333;">
+          <div class="progress-bar" role="progressbar" style="width:0%;background:#5cb85c;color:#000;padding:2px 6px;">0%</div>
+        </div>
+        <button type="button" class="btn cancel-process" style="margin-top:6px;display:none;">Cancel</button>
+      </div>
       <div class="clearfix"></div>
       <div class="error" style="display:none;"></div>
-      <div class="binary" style="display:none;">
-        <h3>Binary representation of your message</h3>
-        <textarea class="form-control message" style="word-wrap:break-word;"></textarea>
-      </div>
       <div class="images" style="display:none;">
         <div class="original" style="display:none;">
           <h3>Original</h3><canvas></canvas>
@@ -110,7 +112,6 @@
 <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.11.1/jquery.min.js"></script>
 <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.1/js/bootstrap.min.js"></script>
 <script type="text/JavaScript" src="script.js"></script>
-
 <script>
 // animated mesh background
 const c=document.getElementById('mesh-bg'),ctx=c.getContext('2d');

@@ -53,12 +53,14 @@
           <button class="encode btn pull-right" type="button" onclick="encodeMessageAudio(event)">Encode</button>
         </div>
       </form>
+      <div class="progress-area" style="margin-top:10px;display:none;">
+        <div class="progress" style="height:20px;background:#222;border:1px solid #333;">
+          <div class="progress-bar" role="progressbar" style="width:0%;background:#5cb85c;color:#000;padding:2px 6px;">0%</div>
+        </div>
+        <button type="button" class="btn cancel-process" style="margin-top:6px;display:none;">Cancel</button>
+      </div>
       <div class="clearfix"></div>
       <div class="error" style="display:none;color:#f66;margin-top:8px;"></div>
-      <div class="binary" style="display:none;margin-top:10px;">
-        <h3>Binary representation of your message</h3>
-        <textarea class="form-control message" style="word-wrap:break-word;"></textarea>
-      </div>
       <div class="images" style="display:none;margin-top:12px;">
         <div class="original">
           <h3>Original file info</h3>

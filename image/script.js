@@ -2,6 +2,32 @@ $('button.encode, button.decode, button.download').click(function(event) {
   event.preventDefault();
 });
 
+// Worker and cancellation handle
+var imageWorker = null;
+var imageWorkerActive = false;
+
+function ensureImageWorker() {
+  if (imageWorker) return;
+  if (window.Worker) {
+    try {
+      imageWorker = new Worker('/image/worker.js');
+    } catch (err) {
+      imageWorker = null;
+    }
+  }
+}
+
+function resetImageWorker() {
+  if (imageWorker) {
+    try { imageWorker.terminate(); } catch (e) {}
+    imageWorker = null;
+  }
+  imageWorkerActive = false;
+  $('.progress-area').hide();
+  $('.progress-area .progress-bar').css('width','0%').text('0%');
+  $('.progress-area .cancel-process').hide();
+}
+
 function previewDecodeImage() {
   var file = document.querySelector('input[name=decodeFile]').files[0];
 
@@ -94,55 +120,120 @@ function encodeMessage(event) {
     'width': width,
     'height': height
   });
+  // If Web Worker available, hand off the heavy work to it
+  ensureImageWorker();
+  if (imageWorker) {
+    imageWorkerActive = true;
+    $('.progress-area').show();
+    $('.progress-area .cancel-process').show();
+    $('.progress-area .progress-bar').css('width','0%').text('0%');
 
-  // Normalize the original image and draw it
+    var messageBytes = new Uint8Array(text.length + 4);
+    // 4-byte big endian length header
+    var msgLen = text.length >>> 0;
+    messageBytes[0] = (msgLen >>> 24) & 0xFF;
+    messageBytes[1] = (msgLen >>> 16) & 0xFF;
+    messageBytes[2] = (msgLen >>> 8) & 0xFF;
+    messageBytes[3] = msgLen & 0xFF;
+    for (var mi = 0; mi < text.length; mi++) messageBytes[4 + mi] = text.charCodeAt(mi) & 0xFF;
+
+    var imageData = originalContext.getImageData(0, 0, width, height);
+    var pixels = imageData.data;
+
+    var onmessage = function(ev) {
+      var d = ev.data;
+      if (d.type === 'progress') {
+        $('.progress-area .progress-bar').css('width', d.progress + '%').text(d.progress + '%');
+      } else if (d.type === 'done') {
+        // d.imageData is transferred ArrayBuffer
+        var newPixels = new Uint8ClampedArray(d.imageData);
+        var newImageData = new ImageData(newPixels, width, height);
+        messageContext.putImageData(newImageData, 0, 0);
+        $('.binary').fadeIn();
+        $('.images .nulled').fadeIn();
+        $('.images .message').fadeIn();
+        $('.download').prop('disabled', false);
+        imageWorker.removeEventListener('message', onmessage);
+        resetImageWorker();
+      } else if (d.type === 'error') {
+        $('.error').text('Worker error: ' + d.message).show();
+        imageWorker.removeEventListener('message', onmessage);
+        resetImageWorker();
+      }
+    };
+
+    imageWorker.addEventListener('message', onmessage);
+    // Transfer the pixel buffer to worker
+    try {
+      imageWorker.postMessage({action: 'encode', width: width, height: height, imageData: pixels.buffer, messageBytes: messageBytes}, [pixels.buffer, messageBytes.buffer]);
+    } catch (err) {
+      // if transfer fails, fall back to copying
+      imageWorker.postMessage({action: 'encode', width: width, height: height, imageData: (new Uint8ClampedArray(pixels)).buffer, messageBytes: messageBytes}, [(new Uint8ClampedArray(pixels)).buffer, messageBytes.buffer]);
+    }
+    // cancel button handler
+    $('.progress-area .cancel-process').off('click').on('click', function() {
+      resetImageWorker();
+    });
+    return;
+  }
+
+  // Fallback if no worker: do chunked processing on main thread (existing behavior)
   var original = originalContext.getImageData(0, 0, width, height);
   var pixel = original.data;
-  for (var i = 0, n = pixel.length; i < n; i += 4) {
-    for (var offset =0; offset < 3; offset ++) {
-      if(pixel[i + offset] %2 != 0) {
-        pixel[i + offset]--;
+  // Normalize in chunks
+  (function normalizePixelsAsync(){
+    var i = 0;
+    var n = pixel.length;
+    var CHUNK = 1 << 20;
+    function step() {
+      var end = Math.min(i + CHUNK, n);
+      for (; i < end; i += 4) {
+        for (var offset = 0; offset < 3; offset++) if (pixel[i + offset] % 2 != 0) pixel[i + offset]--;
       }
-    }
-  }
-  nulledContext.putImageData(original, 0, 0);
-
-  // Convert the message to a binary string
-  var binaryMessage = "";
-  for (var i = 0; i < text.length; i++) {
-    var binaryChar = text[i].charCodeAt(0).toString(2);
-
-    // Pad with 0 until the binaryChar has a lenght of 8 (1 Byte)
-    while(binaryChar.length < 8) {
-      binaryChar = "0" + binaryChar;
-    }
-
-    binaryMessage += binaryChar;
-  }
-  $('.binary textarea').text(binaryMessage);
-
-  // Apply the binary string to the image and draw it
-  var message = nulledContext.getImageData(0, 0, width, height);
-  pixel = message.data;
-  var counter = 0;
-  for (var i = 0, n = pixel.length; i < n; i += 4) {
-    for (var offset =0; offset < 3; offset ++) {
-      if (counter < binaryMessage.length) {
-        pixel[i + offset] += parseInt(binaryMessage[counter]);
-        counter++;
-      }
+      if (i < n) setTimeout(step, 0);
       else {
-        break;
+        nulledContext.putImageData(original, 0, 0);
+        applyMessageAsync();
       }
     }
-  }
-  messageContext.putImageData(message, 0, 0);
+    step();
+  })();
 
-  $(".binary").fadeIn();
-  $(".images .nulled").fadeIn();
-  $(".images .message").fadeIn();
-  // enable the download button now that the message canvas exists
-  $(".download").prop('disabled', false);
+  function applyMessageAsync(){
+    var msgBytes = new Uint8Array(text.length);
+    for (var i = 0; i < text.length; i++) msgBytes[i] = text.charCodeAt(i) & 0xFF;
+    $('.binary textarea').text('(' + msgBytes.length + ' bytes)');
+    var message = nulledContext.getImageData(0, 0, width, height);
+    pixel = message.data;
+    var totalBits = msgBytes.length * 8;
+    var bitIndex = 0;
+    var i = 0;
+    var n = pixel.length;
+    var CHUNK_PIXELS = 1 << 16;
+    function step() {
+      var processed = 0;
+      while (i < n && bitIndex < totalBits && processed < CHUNK_PIXELS) {
+        for (var offset = 0; offset < 3 && bitIndex < totalBits; offset++) {
+          var byteIndex = (bitIndex / 8) | 0;
+          var bitInByte = 7 - (bitIndex & 7);
+          var bit = (msgBytes[byteIndex] >> bitInByte) & 1;
+          pixel[i + offset] = (pixel[i + offset] & 0xFE) | bit;
+          bitIndex++;
+        }
+        i += 4;
+        processed++;
+      }
+      if (i < n && bitIndex < totalBits) setTimeout(step, 0);
+      else {
+        messageContext.putImageData(message, 0, 0);
+        $('.binary').fadeIn();
+        $('.images .nulled').fadeIn();
+        $('.images .message').fadeIn();
+        $('.download').prop('disabled', false);
+      }
+    }
+    step();
+  }
 };
 
 // Download the message canvas as an image (PNG)
@@ -189,33 +280,69 @@ function decodeMessage(event) {
   if (event && event.preventDefault) event.preventDefault();
   var $originalCanvas = $('.decode canvas');
   var originalContext = $originalCanvas[0].getContext("2d");
+  // Try to use a worker for decoding if available
+  ensureImageWorker();
+  var imageData = originalContext.getImageData(0, 0, $originalCanvas[0].width, $originalCanvas[0].height);
+  var pixels = imageData.data;
+  if (imageWorker) {
+    imageWorkerActive = true;
+    $('.progress-area').show();
+    $('.progress-area .cancel-process').show();
+    $('.progress-area .progress-bar').css('width','0%').text('0%');
 
-  // Use the actual canvas pixel dimensions (DOM properties) when reading pixels
-  var original = originalContext.getImageData(0, 0, $originalCanvas[0].width, $originalCanvas[0].height);
-  var binaryMessage = "";
-  var pixel = original.data;
-  for (var i = 0, n = pixel.length; i < n; i += 4) {
-    for (var offset =0; offset < 3; offset ++) {
-      var value = 0;
-      if(pixel[i + offset] %2 != 0) {
-        value = 1;
+    var onmessage = function(ev) {
+      var d = ev.data;
+      if (d.type === 'progress') {
+        $('.progress-area .progress-bar').css('width', d.progress + '%').text(d.progress + '%');
+      } else if (d.type === 'done-decode') {
+        $('.binary-decode textarea').text(d.text);
+        $('.binary-decode').fadeIn();
+        imageWorker.removeEventListener('message', onmessage);
+        resetImageWorker();
+      } else if (d.type === 'error') {
+        $('.error').text('Worker error: ' + d.message).show();
+        imageWorker.removeEventListener('message', onmessage);
+        resetImageWorker();
       }
+    };
 
-      binaryMessage += value;
+    imageWorker.addEventListener('message', onmessage);
+    try {
+      imageWorker.postMessage({action: 'decode', imageData: pixels.buffer}, [pixels.buffer]);
+    } catch (err) {
+      imageWorker.postMessage({action: 'decode', imageData: (new Uint8ClampedArray(pixels)).buffer}, [(new Uint8ClampedArray(pixels)).buffer]);
     }
+    $('.progress-area .cancel-process').off('click').on('click', function() { resetImageWorker(); });
+    return;
   }
 
-  var output = "";
-  for (var i = 0; i < binaryMessage.length; i += 8) {
-    var c = 0;
-    for (var j = 0; j < 8; j++) {
-      c <<= 1;
-      c |= parseInt(binaryMessage[i + j]);
+  // Fallback: do main-thread chunked decode
+  var pixel = pixels;
+  (function decodeAsync(){
+    var i = 0;
+    var n = pixel.length;
+    var CHUNK_PIXELS = 1 << 16;
+    var bitsBuffer = [];
+
+    function step() {
+      var processed = 0;
+      while (i < n && processed < CHUNK_PIXELS) {
+        for (var offset = 0; offset < 3; offset++) bitsBuffer.push(pixel[i + offset] & 1);
+        i += 4; processed++;
+      }
+      if (i < n) setTimeout(step, 0);
+      else {
+        var out = [];
+        for (var bi = 0; bi + 7 < bitsBuffer.length; bi += 8) {
+          var c = 0;
+          for (var j = 0; j < 8; j++) c = (c << 1) | bitsBuffer[bi + j];
+          out.push(String.fromCharCode(c));
+        }
+        var output = out.join('');
+        $('.binary-decode textarea').text(output);
+        $('.binary-decode').fadeIn();
+      }
     }
-
-    output += String.fromCharCode(c);
-  }
-
-  $('.binary-decode textarea').text(output);
-  $('.binary-decode').fadeIn();
+    step();
+  })();
 };
